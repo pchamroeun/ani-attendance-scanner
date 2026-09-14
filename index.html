@@ -20,13 +20,6 @@
     <div id="result" class="result">Ready.</div>
   </div>
 </main>
-<iframe id="postTarget" name="postTarget" title="Attendance submission" hidden></iframe>
-<form id="scanPostForm" method="post" target="postTarget" hidden>
-  <input name="action" value="scanAttendanceExternal">
-  <input id="formSessionId" name="sessionId">
-  <input id="formScannerToken" name="scannerToken">
-  <input id="formQrToken" name="qrToken">
-</form>
 <script>
 (function(){
   'use strict';
@@ -40,13 +33,12 @@
   function stopCamera(){if(raf)cancelAnimationFrame(raf);raf=null;if(stream)stream.getTracks().forEach(function(t){t.stop()});stream=null;q('video').srcObject=null;q('placeholder').style.display='block';}
   function scanLoop(){var v=q('video'),c=q('canvas');if(v.readyState===v.HAVE_ENOUGH_DATA){c.width=v.videoWidth;c.height=v.videoHeight;var ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(v,0,0);var d=ctx.getImageData(0,0,c.width,c.height);var found=window.jsQR&&jsQR(d.data,d.width,d.height,{inversionAttempts:'attemptBoth'});if(found&&found.data&&found.data!==last&&!busy){last=found.data;submitScan(found.data);}}raf=requestAnimationFrame(scanLoop);}
   function submitScan(qr){
-    if(busy)return; busy=true; show('QR detected. Sending attendance...');
-    var form=q('scanPostForm'); form.action=endpoint;
-    q('formSessionId').value=session; q('formScannerToken').value=token; q('formQrToken').value=qr;
-    var done=false;
-    function complete(){if(done)return;done=true;show('Attendance request sent. Refresh the Lecturer roster to verify.','good');if(navigator.vibrate)navigator.vibrate([80,40,120]);setTimeout(function(){busy=false;last='';show('Ready for the next student.');},cooldown);}
-    q('postTarget').onload=complete;
-    try{form.submit();setTimeout(complete,1500);}catch(e){busy=false;last='';show('Submission failed: '+e.message,'bad');}
+    if(busy)return; busy=true; show('QR detected. Verifying with ANI LMS...');
+    var callback='aniScanCallback_'+Date.now(),script=document.createElement('script'),timer;
+    window[callback]=function(r){clearTimeout(timer);delete window[callback];script.remove();if(r&&r.ok){var label=r.statusLabel||r.status||'Recorded';show('Attendance recorded: '+(r.student&&r.student.name?r.student.name:'Student')+' | '+(r.student&&r.student.studentId?r.student.studentId:'')+' | '+label,'good');if(navigator.vibrate)navigator.vibrate([80,40,120]);}else{show('Attendance rejected: '+((r&&r.message)||'Unknown backend error'),'bad');}setTimeout(function(){busy=false;last='';show('Ready for the next student.');},cooldown);};
+    script.onerror=function(){clearTimeout(timer);delete window[callback];script.remove();busy=false;last='';show('Unable to reach ANI LMS. Check the current /exec deployment URL and internet connection.','bad');};
+    script.src=endpoint+(endpoint.indexOf('?')>=0?'&':'?')+'action=scanAttendanceExternal&sessionId='+encodeURIComponent(session)+'&scannerToken='+encodeURIComponent(token)+'&qrToken='+encodeURIComponent(qr)+'&callback='+encodeURIComponent(callback)+'&_='+Date.now();
+    document.body.appendChild(script);timer=setTimeout(function(){if(window[callback]){delete window[callback];script.remove();busy=false;last='';show('ANI LMS did not respond within 15 seconds. Create a new scanner session and try again.','bad');}},15000);
   }
   q('start').onclick=startCamera; q('stop').onclick=stopCamera; q('switch').onclick=function(){facing=facing==='environment'?'user':'environment';startCamera();}; configure();
 }());
